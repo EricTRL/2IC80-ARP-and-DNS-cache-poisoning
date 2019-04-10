@@ -186,9 +186,6 @@ class Application(Frame):
             wrpcap("loggedPackets.cap",self.interceptedPackets)
         print "(GENERAL) Intercepted packets stored!"
         root.destroy()
-
-    def dns_cache_poison(self):
-        pass
         
     def dns_spoof(self, WEBSITE, DNS_SERVER):
 
